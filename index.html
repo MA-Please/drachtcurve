@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=no"/>
+  <title>Drachtcurve wegbermen</title>
+  <link type="text/css" rel="stylesheet" href="css/materialize.min.css" />
+  <link type="text/css" rel="stylesheet" href="css/material-icons.css">
+  <link type="text/css" rel="stylesheet" href="css/print.css">
+  <!-- Insert this line above script imports  -->
+  <script>
+  if (typeof module === 'object') {
+    window.module = module; module = undefined;
+  }
+  </script>
+
+  <!-- normal script imports etc  -->
+  <script type="text/javascript" src="js/jquery-3.2.0.min.js"></script>
+  <script type="text/javascript" src="js/materialize.min.js"></script>
+  <script type="text/javascript" src="js/chart.js"></script>
+
+  <!-- Insert this line after script imports -->
+  <script>
+    if (window.module) module = window.module;
+  </script>
+
+  <style>
+    table thead
+    {
+      position: fixed;
+      background-color: #ffffff;
+      clear: both;
+      padding-top: 20px;
+      margin-top: -20px;
+    }
+    table
+    {
+      overflow-x: auto;
+    }
+    body
+    {
+      overflow: hidden;
+    }
+    tr, td{
+      margin: 0;
+    }
+  </style>
+</head>
+<body style="height: 100%; margin-top: 20px;">
+  <div class="row topGraph" style="height: 100%;">
+    <div class="col s6 m8 l8 topGraph" style="position: fixed; right: 0;">
+      <div class="row topGraph">
+        <div class="col s12" style="height: 50vh;" id="graph">
+          <canvas id="grafiek"></canvas>
+          <a class="waves-effect waves-light btn" id="exportGraph">Grafiek opslaan</a>
+        </div>
+        <form class="col s12 noprint" id="plantenForm">
+          <div class="row">
+            <div class="input-field col s8">
+              <select id="plantSelector" required>
+                <option value="" disabled selected>Kies plant</option>
+              </select>
+              <label>Selecteer plant</label>
+            </div>
+            <div class="input-field col s4">
+              <input value="0.0" placeholder="0.0" min="0" max="100" step="0.5" id="percent" type="number" class="validate" required>
+              <label for="percent">Percent</label>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input-field col s12">
+              <a class="waves-effect waves-light btn" id="addPlant">Toevoegen</a>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div id="table-div" class="col s6 m4 l4 noprint" style="float: left; overflow-y: auto; display: block;">
+      <table style="height: 100%" class="highlight striped">
+        <thead>
+          <tr style="width: 70px !important;"><th id="percent-title">%</th><th id="soort-title">Soort</th><th id="nectar-title">N</th><th id="stuifmeel-title">S</th><th id="delete"><i class="material-icons">delete</i></th></tr>
+        </thead>
+        <tbody style="height: 100%" id="plantTable">
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+<script>
+  plantFile = "";
+  dataFile = "";
+
+  var plantArray = [];
+  var dataArray = [];
+  var nectarTotal = new Object();
+  var pollenTotal = new Object();
+  var combinedTotal = new Object();
+
+  var combinedNectarTotal = 0;
+  var combinedPollenTotal = 0;
+  var combinedCombinedTotal = 0;
+
+
+  var graphCanvas = document.getElementById("grafiek");
+  var drachtcurveChart;
+
+  const {dialog} = require('electron').remote;
+  const fs = require("fs");
+
+  $(window).resize(function() {
+    console.log('resize');
+    resizeTable();
+    resizeGraph();
+
+    setTimeout(function(){
+      resizeTable();
+      resizeGraph();
+    }, 100);
+  });
+
+  $(document).ready(function() {
+  });
+
+  $(window).on('load', function () {
+    $('select').material_select();
+    writeGraph();
+    importData("plantendata.json");
+    importPlants("plantenlijst.json");
+
+    setTimeout(function(){
+      resizeTable();
+      resizeGraph();
+    }, 100);
+  });
+
+  function resizeTable() {
+      $('#percent-title').width($( ".percent input" ).width());
+      $('#soort-title').width($( ".soort" ).width());
+      $('#nectar-title').width($( ".nectar" ).width());
+      $('#stuifmeel-title').width($( ".stuifmeel" ).width());
+      $('#delete').width($( ".delete" ).width());
+      $('#table-div').height($(window).height()-40);
+  }
+
+  function resizeGraph(){
+    $('#graph').height($(window).height()-$('#plantenForm').height()-40);
+  }
+
+  require('electron').ipcRenderer.on('ping', function(event, message) {
+    switch(message){
+      case "openData":
+        fileName =  dialog.showOpenDialog({filters: [{name: 'plantendata', extensions: ['json']}],properties: ['Importeer data']});
+        if(!fileName==""){
+          importData(fileName);
+        }
+        break;
+      case "exportData":
+        fileName =  dialog.showSaveDialog({filters: [{name: 'plantendata', extensions: ['json']}],properties: ['Exporteer data']});
+        if(!fileName==""){
+          exportData(fileName);
+        }
+        break;
+      case "openPlanten":
+        fileName =  dialog.showOpenDialog({filters: [{name: 'plantenlijst', extensions: ['json']}],properties: ['Importeer planten']});
+        if(!fileName==""){
+          importPlants(fileName);
+        }
+        break;
+      case "exportPlanten":
+        fileName =  dialog.showSaveDialog({filters: [{name: 'plantenlijst', extensions: ['json']}],properties: ['Export planten']});
+        if(!fileName==""){
+          exportPlants(fileName);
+        }
+        break;
+      case "changeData":
+        changeData();
+        break;
+    }
+  });
+
+  function importData(fileName){
+    console.log("import data");
+    data  = fs.readFileSync(String(fileName)).toString();
+
+    data = JSON.parse(data);
+    dataArray = [];
+
+    $.each(data, function(i, item) {
+      var itemObject = {};
+      itemObject["id"] = item.id;
+      itemObject["soort_ned"] = item.soort.nederlands;
+      itemObject["soort_lat"] = item.soort.latijns;
+      itemObject["nectarwaarde"] = item.waarden.nectar;
+      itemObject["stuifmeelwaarde"] = item.waarden.stuifmeel;
+      itemObject["januari"] = item.bloeiperiode.januari;
+      itemObject["februari"] = item.bloeiperiode.februari;
+      itemObject["maart"] = item.bloeiperiode.maart;
+      itemObject["april"] = item.bloeiperiode.april;
+      itemObject["mei"] = item.bloeiperiode.mei;
+      itemObject["juni"] = item.bloeiperiode.juni;
+      itemObject["juli"] = item.bloeiperiode.juli;
+      itemObject["augustus"] = item.bloeiperiode.augustus;
+      itemObject["september"] = item.bloeiperiode.september;
+      itemObject["oktober"] = item.bloeiperiode.oktober;
+      itemObject["november"] = item.bloeiperiode.november;
+      itemObject["december"] = item.bloeiperiode.december;
+      dataArray.push(itemObject);
+    });
+    dataArray.sort(function(a, b){
+      var sortAName = a.soort_ned.toUpperCase(); // ignore upper and lowercase
+      var sortBName = b.soort_ned.toUpperCase(); // ignore upper and lowercase
+
+      if (sortAName < sortBName) {
+        return -1;
+      }
+      if (sortAName > sortBName) {
+        return 1;
+      }
+
+      // names must be equal
+      return 0;
+    });
+    fillSelector();
+  }
+
+  function importPlants(fileName){
+    data  = fs.readFileSync(String(fileName)).toString();
+
+    data = JSON.parse(data);
+    plantArray = [];
+
+    $.each(data, function(i, item) {
+      var itemObject = {};
+      itemObject["id"] = item.id;
+      itemObject["percentage"] = item.percentage;
+      plantArray.push(itemObject);
+    });
+    fillPlantTable();
+  }
+
+  function exportData(fileName){
+    var data = '[';
+    for (var i in dataArray) {
+      var percentage = dataArray[i].percentage;
+      var id = dataArray[i].id;
+      var soort_ned = dataArray[i].soort_ned;
+      var soort_lat = dataArray[i].soort_lat;
+      var nectarwaarde = dataArray[i].nectarwaarde;
+      var stuifmeelwaarde = dataArray[i].stuifmeelwaarde;
+      var januari = dataArray[i].januari;
+      var februari = dataArray[i].februari;
+      var maart = dataArray[i].maart;
+      var april = dataArray[i].april;
+      var mei = dataArray[i].mei;
+      var juni = dataArray[i].juni;
+      var juli = dataArray[i].juli;
+      var augustus = dataArray[i].augustus;
+      var september = dataArray[i].september;
+      var oktober = dataArray[i].oktober;
+      var november = dataArray[i].november;
+      var december = dataArray[i].december;
+
+      data += '{"id":"' + id + '","soort":';
+      data += '{"nederlands":"' + soort_ned + '","latijns":"' + soort_lat + '"},"waarden":';
+      data += '{"nectar":"' + nectarwaarde + '","stuifmeel":"' + stuifmeelwaarde + '"},"bloeiperiode":';
+      data += '{"januari":"' + januari + '","februari":"' + februari + '",';
+      data += '"maart":"' + maart + '","april":"' + april + '",';
+      data += '"mei":"' + mei + '","juni":"' + juni + '",';
+      data += '"juli":"' + juli + '","augustus":"' + augustus + '",';
+      data += '"september":"' + september + '","oktober":"' + oktober + '",';
+      data += '"november":"' + november + '","december":"' + december + '"}},';
+    }
+    data = data.slice(0, -1);
+    data += ']';
+    fs.writeFile(String(fileName), data, function(err){
+      if(err){
+        return console.log(err);
+      }
+    });
+  }
+
+  function exportPlants(fileName){
+    var data = '[';
+    for (var i in plantArray) {
+      var percentage = plantArray[i].percentage;
+      var id = plantArray[i].id;
+
+      data += '{"id":"' + id + '", "percentage":"' + percentage + '"},';
+    }
+    data = data.slice(0, -1);
+    data += ']';
+    fs.writeFile(String(fileName), data, function(err){
+      if(err){
+        return console.log(err);
+      }
+    });
+  }
+
+  function fillPlantTable(){
+    rows = '<tr style="height: 20px !important;"><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>';
+    for (var i in plantArray) {
+      var percentage = plantArray[i].percentage;
+      var id = parseInt(plantArray[i].id);
+      var number = parseInt(plantArray[i].number);
+
+      x = dataArray.reduce(function(a, b){
+          return (a.id==id && a) || (b.id == id && b)
+      });
+      var soort = x.soort_ned;
+      var nectarwaarde = x.nectarwaarde;
+      var stuifmeelwaarde = x.stuifmeelwaarde;
+
+      row = '<tr id="plant-' + id
+      row += '"><td class="percent"  style="width: 70px !important;"><input type="number" number="' + i + '" value="' + percentage + '" maxlength="4" min="0" max="100" step="0.5">';
+      row += '</td><td class="soort">' + soort;
+      row += '</td><td class="nectar">' + nectarwaarde;
+      row += '</td><td class="stuifmeel">' + stuifmeelwaarde;
+      row += '</td><td class="delete" number="' + i + '"><a><i class="material-icons">delete</i></a></td></tr>';
+      rows += row;
+    }
+    $('#plantTable').html(rows);
+    resizeTable();
+    updateGraph();
+  }
+
+  function fillSelector(){
+    rows = '<option value="" disabled selected>Kies plant</option>';
+    for (var i in dataArray) {
+      var id = dataArray[i].id;
+      var soort = dataArray[i].soort_ned;
+
+      row = '<option value="' + id + '">';
+      row += soort + '</option>';
+      rows += row;
+    }
+    $('#plantSelector').html(rows);
+    $('#plantSelector').material_select();
+  }
+
+  $('#exportGraph').click(function(){
+      var {ipcRenderer} = require('electron')
+
+      fileName =  dialog.showSaveDialog({filters: [{name: 'grafiek', extensions: ['pdf']}],properties: ['Export grafiek']});
+      if(!fileName==""){
+        ipcRenderer.send('exportGraph', fileName);
+      }
+  });
+
+  $('#addPlant').click(function(){
+    var itemObject = {};
+
+    var id = $('#plantSelector option:selected').val();
+    console.log('id: ' + id);
+
+    if(id !== undefined){
+      var percentage = parseFloat($('#percent').val());
+
+      var totaalPercentage = parseFloat(countPercentage());
+      console.log('value: ' + percentage);
+
+      itemObject['id'] = id;
+
+      if (isNaN(percentage)){
+        percentage = 0;
+      }
+
+      if (percentage > 100){
+        percentage = 100;
+      }
+
+      itemObject['percentage'] = percentage;
+
+      /*var totalBeforeUpdate = 0 + totaalPercentage + percentage;
+
+      if(totalBeforeUpdate > 100){
+        console.log('totaal + huidig groter dan 100: ' + totalBeforeUpdate);
+        dialog.showMessageBox({type: "info", title: "Percentage fout", message: "Totaal percentage groter dan 100, verlaag percentages.",buttons: ["OK"] });
+      }
+      else {
+        plantArray.push(itemObject);
+        fillPlantTable();
+        exportPlants('plantenlijst.json');
+      }*/
+      plantArray.push(itemObject);
+      fillPlantTable();
+      exportPlants('plantenlijst.json');
+    }
+    else {
+      dialog.showMessageBox({type: "info", title: "Selectie fout", message: "Geen soort geselecteerd, selecteer een soort.",buttons: ["OK"] });
+    }
+
+
+  });
+
+  $('#plantTable').on("input", "input", function(){
+    console.log('input fired');
+
+    var name = parseInt($(this).attr('number'));
+    var value = parseFloat($(this).val());
+
+    var itemObject = plantArray[name];
+    itemObject["percentage"] = value;
+
+    /*var totaalPercentage = countPercentage();
+    console.log('value: ' + value);
+
+    if(totaalPercentage > 100){
+      console.log('groter dan 100: ' + totaalPercentage);
+      if(value + (100 - totaalPercentage) < 0){
+        $(this).val(0);
+      }
+      else {
+        $(this).val(value + (100 - totaalPercentage));
+        itemObject["percentage"] = value + (100 - totaalPercentage);
+      }
+    }*/
+
+    console.log('total before update: ' + countPercentage());
+    updateGraph();
+    exportPlants('plantenlijst.json');
+  });
+
+  $('#plantTable').on("click", ".delete", function(){
+    var id = parseInt($(this).attr('number'));
+    console.log('id: ' + id);
+
+    plantArray.splice(id, 1);
+    fillPlantTable();
+    exportPlants('plantenlijst.json');
+  });
+
+  function countPercentage(){
+    var percentageTotaal = 0;
+    for (var i in plantArray) {
+      var percentage = parseFloat(plantArray[i].percentage);
+      percentageTotaal += percentage;
+      console.log(percentage);
+      console.log('totaal nu: ' + percentageTotaal);
+    }
+    return percentageTotaal;
+  }
+
+  function updateGraph(){
+    calculateTotals();
+    drachtcurveChart.data.datasets[0].data[0] = parseFloat(pollenTotal.januari).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[1] = parseFloat(pollenTotal.februari).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[2] = parseFloat(pollenTotal.maart).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[3] = parseFloat(pollenTotal.april).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[4] = parseFloat(pollenTotal.mei).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[5] = parseFloat(pollenTotal.juni).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[6] = parseFloat(pollenTotal.juli).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[7] = parseFloat(pollenTotal.augustus).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[8] = parseFloat(pollenTotal.september).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[9] = parseFloat(pollenTotal.oktober).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[10] = parseFloat(pollenTotal.november).toFixed(2);
+    drachtcurveChart.data.datasets[0].data[11] = parseFloat(pollenTotal.december).toFixed(2);
+
+    drachtcurveChart.data.datasets[1].data[0] = parseFloat(nectarTotal.januari).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[1] = parseFloat(nectarTotal.februari).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[2] = parseFloat(nectarTotal.maart).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[3] = parseFloat(nectarTotal.april).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[4] = parseFloat(nectarTotal.mei).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[5] = parseFloat(nectarTotal.juni).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[6] = parseFloat(nectarTotal.juli).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[7] = parseFloat(nectarTotal.augustus).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[8] = parseFloat(nectarTotal.september).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[9] = parseFloat(nectarTotal.oktober).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[10] = parseFloat(nectarTotal.november).toFixed(2);
+    drachtcurveChart.data.datasets[1].data[11] = parseFloat(nectarTotal.december).toFixed(2);
+
+    drachtcurveChart.data.datasets[2].data[0] = parseFloat(combinedTotal.januari).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[1] = parseFloat(combinedTotal.februari).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[2] = parseFloat(combinedTotal.maart).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[3] = parseFloat(combinedTotal.april).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[4] = parseFloat(combinedTotal.mei).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[5] = parseFloat(combinedTotal.juni).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[6] = parseFloat(combinedTotal.juli).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[7] = parseFloat(combinedTotal.augustus).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[8] = parseFloat(combinedTotal.september).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[9] = parseFloat(combinedTotal.oktober).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[10] = parseFloat(combinedTotal.november).toFixed(2);
+    drachtcurveChart.data.datasets[2].data[11] = parseFloat(combinedTotal.december).toFixed(2);
+
+    drachtcurveChart.data.datasets[0].label = 'Stuifmeel: ' + parseFloat(combinedNectarTotal).toFixed(2);
+    drachtcurveChart.data.datasets[1].label = 'Nectar: ' + parseFloat(combinedPollenTotal).toFixed(2);
+    drachtcurveChart.data.datasets[2].label = 'Totaal: ' + parseFloat(combinedCombinedTotal).toFixed(2);
+
+    drachtcurveChart.update();
+  }
+
+  function writeGraph(){
+    drachtcurveChart = new Chart(graphCanvas, {
+        type: 'line',
+        data: {
+            labels: ["Januari", "Februari", "Maart", "April", "Mei", "Juni", "Juli", "Augustus", "September", "Oktober", "November", "December"],
+            datasets: [{
+                label: 'Stuifmeel',
+                data: [0,0,0,0,0,0,0,0,0,0,0,0],
+                backgroundColor: 'rgba(0, 0, 0, 0)',
+                borderColor: 'rgba(255,99,132,1)',
+                borderWidth: 2
+            },{
+                label: 'Nectar',
+                data: [0,0,0,0,0,0,0,0,0,0,0,0],
+                backgroundColor: 'rgba(0, 0, 0, 0)',
+                borderColor: 'rgba(99,255,132,1)',
+                borderWidth: 2
+            },{
+                label: 'Totaal',
+                data: [0,0,0,0,0,0,0,0,0,0,0,0],
+                backgroundColor: 'rgba(0, 0, 0, 0)',
+                borderColor: 'rgba(99,132,255,1)',
+                borderWidth: 2
+            },
+          ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                yAxes: [{
+                    ticks: {
+                        min: 0,
+                        stepSize: 2
+                    }
+                }]
+            },
+            tooltips: {
+              enabled: true,
+              mode: 'nearest',
+              intersect: false
+            },
+            elements: {
+              line: {
+                tension: 0.2
+              }
+            }
+        }
+    });
+  }
+
+  function calculateTotals(){
+    nectarTotal.januari = 0;
+    nectarTotal.februari = 0;
+    nectarTotal.maart = 0;
+    nectarTotal.april = 0;
+    nectarTotal.mei = 0;
+    nectarTotal.juni = 0;
+    nectarTotal.juli = 0;
+    nectarTotal.augustus = 0;
+    nectarTotal.september = 0;
+    nectarTotal.oktober = 0;
+    nectarTotal.november = 0;
+    nectarTotal.december = 0;
+
+    pollenTotal.januari = 0;
+    pollenTotal.februari = 0;
+    pollenTotal.maart = 0;
+    pollenTotal.april = 0;
+    pollenTotal.mei = 0;
+    pollenTotal.juni = 0;
+    pollenTotal.juli = 0;
+    pollenTotal.augustus = 0;
+    pollenTotal.september = 0;
+    pollenTotal.oktober = 0;
+    pollenTotal.november = 0;
+    pollenTotal.december = 0;
+
+    combinedTotal.januari = 0;
+    combinedTotal.februari = 0;
+    combinedTotal.maart = 0;
+    combinedTotal.april = 0;
+    combinedTotal.mei = 0;
+    combinedTotal.juni = 0;
+    combinedTotal.juli = 0;
+    combinedTotal.augustus = 0;
+    combinedTotal.september = 0;
+    combinedTotal.oktober = 0;
+    combinedTotal.november = 0;
+    combinedTotal.december = 0;
+
+    combinedNectarTotal = 0;
+    combinedPollenTotal = 0;
+    combinedCombinedTotal = 0;
+
+    for (var i in plantArray) {
+      var percentage = plantArray[i].percentage;
+      var id = parseInt(plantArray[i].id);
+      x = dataArray.reduce(function(a, b){
+          return (a.id==id && a) || (b.id == id && b)
+      });
+      var nectarwaarde = x.nectarwaarde;
+      var stuifmeelwaarde = x.stuifmeelwaarde;
+
+      if(x.januari == 'true'){
+        nectarTotal.januari += percentage * nectarwaarde / 100;
+        pollenTotal.januari += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.februari == 'true'){
+        nectarTotal.februari += percentage * nectarwaarde / 100;
+        pollenTotal.februari += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.maart == 'true'){
+        nectarTotal.maart += percentage * nectarwaarde / 100;
+        pollenTotal.maart += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.april == 'true'){
+        nectarTotal.april += percentage * nectarwaarde / 100;
+        pollenTotal.april += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.mei == 'true'){
+        nectarTotal.mei += percentage * nectarwaarde / 100;
+        pollenTotal.mei += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.juni == 'true'){
+        nectarTotal.juni += percentage * nectarwaarde / 100;
+        pollenTotal.juni += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.juli == 'true'){
+        nectarTotal.juli += percentage * nectarwaarde / 100;
+        pollenTotal.juli += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.augustus == 'true'){
+        nectarTotal.augustus += percentage * nectarwaarde / 100;
+        pollenTotal.augustus += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.september == 'true'){
+        nectarTotal.september += percentage * nectarwaarde / 100;
+        pollenTotal.september += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.oktober == 'true'){
+        nectarTotal.oktober += percentage * nectarwaarde / 100;
+        pollenTotal.oktober += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.november == 'true'){
+        nectarTotal.november += percentage * nectarwaarde / 100;
+        pollenTotal.november += percentage * stuifmeelwaarde / 100;
+      }
+
+      if(x.december == 'true'){
+        nectarTotal.december += percentage * nectarwaarde / 100;
+        pollenTotal.december += percentage * stuifmeelwaarde / 100;
+      }
+    }
+
+    combinedTotal.januari = pollenTotal.januari + nectarTotal.januari;
+    combinedTotal.februari =  pollenTotal.februari + nectarTotal.februari;
+    combinedTotal.maart =  pollenTotal.maart + nectarTotal.maart;
+    combinedTotal.april =  pollenTotal.april + nectarTotal.april;
+    combinedTotal.mei =  pollenTotal.mei + nectarTotal.mei;
+    combinedTotal.juni =  pollenTotal.juni + nectarTotal.juni;
+    combinedTotal.juli =  pollenTotal.juli + nectarTotal.juli;
+    combinedTotal.augustus =  pollenTotal.augustus + nectarTotal.augustus;
+    combinedTotal.september =  pollenTotal.september + nectarTotal.september;
+    combinedTotal.oktober =  pollenTotal.oktober + nectarTotal.oktober;
+    combinedTotal.november =  pollenTotal.november + nectarTotal.november;
+    combinedTotal.december =  pollenTotal.december + nectarTotal.december;
+
+    combinedNectarTotal = nectarTotal.januari + nectarTotal.februari + nectarTotal.maart + nectarTotal.april +  nectarTotal.mei + nectarTotal.juni + nectarTotal.juli + nectarTotal.augustus + nectarTotal.september + nectarTotal.oktober + nectarTotal.november + nectarTotal.december;
+    combinedPollenTotal = pollenTotal.januari + pollenTotal.februari + pollenTotal.maart + pollenTotal.april + pollenTotal.mei + pollenTotal.juni + pollenTotal.juli + pollenTotal.augustus + pollenTotal.september + pollenTotal.oktober + pollenTotal.november + pollenTotal.december;
+    combinedCombinedTotal = combinedTotal.januari + combinedTotal.februari + combinedTotal.maart + combinedTotal.april + combinedTotal.mei + combinedTotal.juni + combinedTotal.juli + combinedTotal.augustus + combinedTotal.september + combinedTotal.oktober + combinedTotal.november + combinedTotal.december;
+  }
+
+  function changeData() {
+    var {ipcRenderer} = require('electron')
+    ipcRenderer.send('openChangeData')
+  }
+</script>
+</html>

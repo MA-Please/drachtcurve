@@ -1,0 +1,27 @@
+{
+  "name": "Drachtcurve",
+  "version": "0.1.0",
+  "description": "Drachtcurve wegbermen",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build-win32": "electron-packager ./ --asar=true --overwrite --platform=win32 --icon=icons/icon.ico --prune=true --version-string.CompanyName=\"Sander Verhaeren\" --version-string.FileDescription=\"Drachtcurve\" --version-string.ProductName=\"Drachtcurve\" --appCopyright=\"© Sander Verhaeren 2017\""
+  },
+  "files":[
+    "index.html",
+    "changeData.html",
+    "css/material-icons.css",
+    "css/materialize.min.css",
+    "css/print.css",
+    "js/chart.js",
+    "js/jquery-3.2.0.min.js",
+    "js/materialize.min.js",
+    "fonts/materialize-icons.woff2"
+  ],
+  "author": "sander verhaeren",
+  "copyright": "© 2017, Sander Verhaeren",
+  "license": "ISC",
+  "dependencies": {
+    "electron": "^1.6.5"
+  }
+}
